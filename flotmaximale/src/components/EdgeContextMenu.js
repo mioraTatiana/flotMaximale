@@ -1,8 +1,9 @@
-// components/EdgeContextMenu.js
 import React, { useState } from 'react';
 
 const EdgeContextMenu = ({ position, edge, onUpdateCapacity, onClose }) => {
-  const [capacity, setCapacity] = useState(edge.data.capacity);
+  // Vérification defensive pour s'assurer que edge et edge.data existent
+  const currentCapacity = edge && edge.data ? edge.data.capacity : 0;
+  const [capacity, setCapacity] = useState(currentCapacity);
 
   const handleSubmit = () => {
     onUpdateCapacity(capacity);
@@ -18,6 +19,9 @@ const EdgeContextMenu = ({ position, edge, onUpdateCapacity, onClose }) => {
     borderRadius: '4px',
     padding: '10px',
   };
+
+  // S'assurer que l'arête existe avant d'afficher le menu
+  if (!edge) return null;
 
   return (
     <div style={style} onClick={(e) => e.stopPropagation()}>

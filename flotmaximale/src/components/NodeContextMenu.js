@@ -1,8 +1,9 @@
-// components/NodeContextMenu.js
 import React, { useState } from 'react';
 
 const NodeContextMenu = ({ position, node, onSetAsSource, onSetAsSink, onRename, onClose }) => {
-  const [newName, setNewName] = useState(node.data.label);
+  // Vérification defensive pour s'assurer que node et node.data existent
+  const currentLabel = node && node.data ? node.data.label : '';
+  const [newName, setNewName] = useState(currentLabel);
   const [isRenaming, setIsRenaming] = useState(false);
 
   const handleRename = () => {
@@ -24,6 +25,9 @@ const NodeContextMenu = ({ position, node, onSetAsSource, onSetAsSink, onRename,
     borderRadius: '4px',
     padding: '10px',
   };
+
+  // S'assurer que le nœud existe avant d'afficher le menu
+  if (!node) return null;
 
   return (
     <div style={style} onClick={(e) => e.stopPropagation()}>
@@ -48,5 +52,6 @@ const NodeContextMenu = ({ position, node, onSetAsSource, onSetAsSink, onRename,
     </div>
   );
 };
+
 
 export default NodeContextMenu;

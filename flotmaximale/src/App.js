@@ -46,7 +46,14 @@ const App = () => {
   
   // Référence au conteneur ReactFlow
   const reactFlowWrapper = useRef(null);
-  const [reactFlowInstance, setReactFlowInstance] = useState(null);
+  
+  // Référence à l'instance ReactFlow (corrigé pour éviter le warning)
+  const setReactFlowInstance = useCallback((instance) => {
+    // Nous pouvons stocker l'instance si nécessaire plus tard
+    if (instance) {
+      // Utiliser l'instance si besoin
+    }
+  }, []);
   
   // ID pour les nouveaux nœuds
   const [nodeId, setNodeId] = useState(1);
@@ -72,7 +79,7 @@ const App = () => {
   // Initialisation de ReactFlow
   const onInit = useCallback((instance) => {
     setReactFlowInstance(instance);
-  }, []);
+  }, [setReactFlowInstance]);
   
   // Ajout d'un nouveau nœud
   const onAddNode = useCallback(() => {
@@ -215,6 +222,7 @@ const App = () => {
     
     edges.forEach((edge) => {
       const { source, target, data } = edge;
+      if (!graph[source]) graph[source] = {};
       graph[source][target] = data.capacity;
     });
     
@@ -224,9 +232,9 @@ const App = () => {
     // Création du graphe avec les flots
     const flowEdges = edges.map((edge) => {
       const { source, target, data } = edge;
-      const flow = residualGraph[source][target] ? 
-                   data.capacity - residualGraph[source][target] : 
-                   data.capacity;
+      // Vérifier si les propriétés existent dans le graphe résiduel
+      const sourceExists = residualGraph[source] && typeof residualGraph[source][target] !== 'undefined';
+      const flow = sourceExists ? data.capacity - residualGraph[source][target] : 0;
       
       const isSaturated = flow >= data.capacity;
       const isBlocked = flow === 0;
@@ -265,8 +273,12 @@ const App = () => {
   
   // Basculer entre le graphe original et le graphe avec flot
   const toggleFlowGraph = useCallback(() => {
-    setShowFlowGraph((prev) => !prev);
-  }, []);
+    if (maxFlowResult.flowGraph) {
+      setShowFlowGraph((prev) => !prev);
+    } else {
+      alert("Veuillez d'abord calculer le flot maximal.");
+    }
+  }, [maxFlowResult]);
   
   // Activation de la manipulation des arêtes
   const activateEdgeManipulation = useCallback(() => {
