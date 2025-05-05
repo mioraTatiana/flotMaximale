@@ -1,3 +1,4 @@
+// components/EdgeContextMenu.js
 import React, { useState } from 'react';
 
 const EdgeContextMenu = ({ position, edge, onUpdateCapacity, onClose }) => {

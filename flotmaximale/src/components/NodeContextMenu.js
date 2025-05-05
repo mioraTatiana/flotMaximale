@@ -1,3 +1,4 @@
+// components/NodeContextMenu.js
 import React, { useState } from 'react';
 
 const NodeContextMenu = ({ position, node, onSetAsSource, onSetAsSink, onRename, onClose }) => {
@@ -52,6 +53,5 @@ const NodeContextMenu = ({ position, node, onSetAsSource, onSetAsSink, onRename,
     </div>
   );
 };
-
 
 export default NodeContextMenu;
