@@ -47,13 +47,8 @@ const App = () => {
   // Référence au conteneur ReactFlow
   const reactFlowWrapper = useRef(null);
   
-  // Référence à l'instance ReactFlow (corrigé pour éviter le warning)
-  const setReactFlowInstance = useCallback((instance) => {
-    // Nous pouvons stocker l'instance si nécessaire plus tard
-    if (instance) {
-      // Utiliser l'instance si besoin
-    }
-  }, []);
+  // Référence à l'instance ReactFlow
+  const [reactFlowInstance, setReactFlowInstance] = useState(null);
   
   // ID pour les nouveaux nœuds
   const [nodeId, setNodeId] = useState(1);
@@ -75,11 +70,6 @@ const App = () => {
     };
     setEdges((eds) => addEdge(newEdge, eds));
   }, [setEdges]);
-  
-  // Initialisation de ReactFlow
-  const onInit = useCallback((instance) => {
-    setReactFlowInstance(instance);
-  }, [setReactFlowInstance]);
   
   // Ajout d'un nouveau nœud
   const onAddNode = useCallback(() => {
@@ -137,10 +127,7 @@ const App = () => {
           isSource: n.id === nodeId,
           isSink: n.data.isSink && n.id !== nodeId,
         },
-        style: {
-          ...n.style,
-          backgroundColor: n.id === nodeId ? '#90EE90' : (n.data.isSink ? '#FF6347' : '#ffffff'),
-        },
+        className: n.id === nodeId ? 'node-source' : (n.data.isSink ? 'node-sink' : ''),
       }))
     );
     setSourceNode(nodeId);
@@ -157,10 +144,7 @@ const App = () => {
           isSink: n.id === nodeId,
           isSource: n.data.isSource && n.id !== nodeId,
         },
-        style: {
-          ...n.style,
-          backgroundColor: n.id === nodeId ? '#FF6347' : (n.data.isSource ? '#90EE90' : '#ffffff'),
-        },
+        className: n.id === nodeId ? 'node-sink' : (n.data.isSource ? 'node-source' : ''),
       }))
     );
     setSinkNode(nodeId);
@@ -253,6 +237,8 @@ const App = () => {
           stroke: isSaturated ? '#FF0000' : (isBlocked ? '#CCCCCC' : '#008000'),
           strokeWidth: isSaturated ? 3 : 1,
         },
+        className: isSaturated ? 'edge-saturated' : (isBlocked ? 'edge-blocked' : 'edge-flowing'),
+        strokeDasharray: isBlocked ? '5,5' : undefined,
       };
     });
     
@@ -300,7 +286,7 @@ const App = () => {
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
-          onInit={onInit}
+          onInit={setReactFlowInstance}
           nodeTypes={nodeTypes}
           onNodeClick={onNodeClick}
           onEdgeClick={onEdgeClick}
