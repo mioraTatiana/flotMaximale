@@ -1,6 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect } from "react";
 
-
 // Algorithme Ford-Fulkerson
 const fordFulkerson = (nodes, edges, sourceId, targetId) => {
   // Construire le graphe résiduel
@@ -11,12 +10,11 @@ const fordFulkerson = (nodes, edges, sourceId, targetId) => {
 
   edges.forEach((edge) => {
     residualGraph[edge.source][edge.target] = edge.capacity;
-    // Initialiser l'arête inverse avec capacité 0
     if (!residualGraph[edge.target]) residualGraph[edge.target] = {};
     residualGraph[edge.target][edge.source] = 0;
   });
 
-  // BFS pour trouver un chemin augmentant
+  // BFS amélioré pour Ford-Fulkerson
   const bfs = (source, target, parent) => {
     const visited = new Set();
     const queue = [source];
@@ -26,15 +24,18 @@ const fordFulkerson = (nodes, edges, sourceId, targetId) => {
     while (queue.length > 0) {
       const u = queue.shift();
 
-      for (const v in residualGraph[u]) {
-        if (!visited.has(v) && residualGraph[u][v] > 0) {
-          visited.add(v);
-          parent[v] = u;
-          queue.push(v);
+      // Trier les voisins par capacité décroissante (optimisation)
+      const neighbors = Object.keys(residualGraph[u])
+        .filter((v) => !visited.has(v) && residualGraph[u][v] > 0)
+        .sort((a, b) => residualGraph[u][b] - residualGraph[u][a]);
 
-          if (v === target) {
-            return true;
-          }
+      for (const v of neighbors) {
+        visited.add(v);
+        parent[v] = u;
+        queue.push(v);
+
+        if (v === target) {
+          return true;
         }
       }
     }
@@ -44,17 +45,24 @@ const fordFulkerson = (nodes, edges, sourceId, targetId) => {
 
   let maxFlow = 0;
   const parent = {};
+  const paths = [];
 
-  // Tant qu'il existe un chemin augmentant
+  // Algorithme principal Ford-Fulkerson
   while (bfs(sourceId, targetId, parent)) {
     // Trouver la capacité minimale le long du chemin
     let pathFlow = Infinity;
+    const currentPath = [];
     let s = targetId;
 
+    // Reconstruire le chemin
     while (s !== sourceId) {
+      currentPath.unshift(s);
       pathFlow = Math.min(pathFlow, residualGraph[parent[s]][s]);
       s = parent[s];
     }
+    currentPath.unshift(sourceId);
+
+    paths.push({ path: currentPath, flow: pathFlow });
 
     // Ajouter le flot du chemin au flot total
     maxFlow += pathFlow;
@@ -70,7 +78,7 @@ const fordFulkerson = (nodes, edges, sourceId, targetId) => {
   }
 
   // Calculer le flot final sur chaque arête
-  const flowEdges = edges.map((edge, index) => {
+  const flowEdges = edges.map((edge) => {
     const originalCapacity = edge.capacity;
     const remainingCapacity = residualGraph[edge.source][edge.target];
     const flow = originalCapacity - remainingCapacity;
@@ -81,9 +89,12 @@ const fordFulkerson = (nodes, edges, sourceId, targetId) => {
     };
   });
 
-  return { maxFlow, flowEdges };
+  return {
+    maxFlow,
+    flowEdges,
+    paths: paths,
+  };
 };
-
 // Composants UI
 const Button = ({
   onClick,
@@ -174,51 +185,110 @@ const showNotification = (message, type = "info") => {
   }, 3000);
 };
 
-const ResultsPage = ({ 
-  maxFlow, 
-  residualTable, 
-  manuelBlochResult, 
-  fordResult, 
-  nodes, 
-  onBack, 
-  onViewGraph 
+const ResultsPage = ({
+  maxFlow,
+  residualTable,
+  manuelBlochResult,
+  fordResult,
+  nodes,
+  onBack,
+  onViewGraph,
 }) => {
   const renderResidualTable = () => {
     if (!residualTable || residualTable.length === 0) return null;
-    
-    const finalResidual = residualTable[residualTable.length - 1].graph;
-    const nodeIds = Object.keys(finalResidual).sort();
 
     return (
       <div className="bg-white p-6 rounded-lg shadow">
-        <h3 className="text-lg font-semibold mb-4">Tableau de Résidu Final</h3>
+        <h3 className="text-lg font-semibold mb-4">Tableau de Résidu</h3>
         <div className="overflow-x-auto">
           <table className="min-w-full border-collapse border border-gray-300">
             <thead>
               <tr className="bg-gray-100">
-                <th className="border border-gray-300 px-3 py-2 font-medium"></th>
-                {nodeIds.map(nodeId => (
-                  <th key={nodeId} className="border border-gray-300 px-3 py-2 font-medium">
-                    {nodes.find(n => n.id === nodeId)?.label || nodeId}
-                  </th>
-                ))}
+                <th className="border border-gray-300 px-3 py-2 font-medium">
+                  Départ
+                </th>
+                <th className="border border-gray-300 px-3 py-2 font-medium">
+                  Arrivée
+                </th>
+                <th className="border border-gray-300 px-3 py-2 font-medium">
+                  Résidu
+                </th>
+                {Array.from(
+                  {
+                    length:
+                      Math.max(...residualTable.map((r) => r.values.length)) -
+                      1,
+                  },
+                  (_, i) => (
+                    <th
+                      key={i}
+                      className="border border-gray-300 px-2 py-2 font-medium text-xs"
+                    >
+                      {i + 1}
+                    </th>
+                  )
+                )}
               </tr>
             </thead>
             <tbody>
-              {nodeIds.map(fromNodeId => (
-                <tr key={fromNodeId}>
-                  <td className="border border-gray-300 px-3 py-2 font-medium bg-gray-50">
-                    {nodes.find(n => n.id === fromNodeId)?.label || fromNodeId}
-                  </td>
-                  {nodeIds.map(toNodeId => (
-                    <td key={toNodeId} className="border border-gray-300 px-3 py-2 text-center">
-                      {finalResidual[fromNodeId]?.[toNodeId] || 0}
+              {residualTable.map((edgeData, index) => {
+                const sourceLabel =
+                  nodes.find((n) => n.id === edgeData.source)?.label ||
+                  edgeData.source;
+                const targetLabel =
+                  nodes.find((n) => n.id === edgeData.target)?.label ||
+                  edgeData.target;
+                const initialCapacity = edgeData.values[0];
+
+                return (
+                  <tr key={index}>
+                    <td className="border border-gray-300 px-3 py-2 font-medium bg-gray-50">
+                      {sourceLabel}
                     </td>
-                  ))}
-                </tr>
-              ))}
+                    <td className="border border-gray-300 px-3 py-2 font-medium bg-gray-50">
+                      {targetLabel}
+                    </td>
+                    <td className="border border-gray-300 px-3 py-2 text-center font-medium">
+                      {initialCapacity}
+                    </td>
+                    {edgeData.values.slice(1).map((value, valueIndex) => {
+                      let displayValue = value;
+                      let cellClass =
+                        "border border-gray-300 px-2 py-2 text-center text-sm font-medium ";
+
+                      if (value === 0) {
+                        displayValue = "B"; // Bloqué
+                        cellClass += "bg-red-100 text-red-800";
+                      } else if (value === initialCapacity) {
+                        cellClass += "bg-white";
+                      } else {
+                        displayValue = "S"; // Saturé (partiellement utilisé)
+                        cellClass += "bg-yellow-100 text-yellow-800";
+                      }
+
+                      return (
+                        <td key={valueIndex} className={cellClass}>
+                          {displayValue}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
+        </div>
+
+        {/* Légende */}
+        <div className="mt-4 flex gap-6 text-sm">
+          <div className="flex items-center gap-2">
+            <div className="w-4 h-4 bg-red-100 border border-red-300"></div>
+            <span>B = Bloqué</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-4 h-4 bg-yellow-100 border border-yellow-300"></div>
+            <span>S = Saturé</span>
+          </div>
         </div>
       </div>
     );
@@ -229,33 +299,35 @@ const ResultsPage = ({
       <div className="bg-white p-6 rounded-lg shadow">
         <div className="flex justify-between items-center mb-4">
           <h3 className="text-lg font-semibold">{title}</h3>
-          <Button 
-            onClick={() => onViewGraph(type, result)}
-            className="text-sm"
-          >
+          <Button onClick={() => onViewGraph(type, result)} className="text-sm">
             Voir le Graphique →
           </Button>
         </div>
-        
+
         <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center bg-gray-50 min-h-[200px] flex items-center justify-center">
           <div className="space-y-2">
             <div className="text-2xl">📊</div>
             <p className="text-gray-600">Aperçu du graphique</p>
-            <p className="text-sm text-gray-500">Flot maximal: {result?.maxFlow || 0}</p>
-            {type === 'manuel' && result?.paths && (
-              <p className="text-xs text-gray-400">{result.paths.length} chemins trouvés</p>
+            <p className="text-sm text-gray-500">
+              Flot maximal: {result?.maxFlow || 0}
+            </p>
+            {type === "residual" && result?.paths && (
+              <p className="text-xs text-gray-400">
+                {result.paths.length} chemins trouvés
+              </p>
             )}
           </div>
         </div>
       </div>
     );
   };
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-6">
       <div className="max-w-6xl mx-auto space-y-6">
         <div className="flex justify-between items-center">
-          <h1 className="text-2xl font-bold">Résultats - Flot Maximal: {maxFlow}</h1>
+          <h1 className="text-2xl font-bold">
+            Résultats - Flot Maximal: {maxFlow}
+          </h1>
           <Button onClick={onBack} className="bg-blue-500 hover:bg-blue-600">
             Retour
           </Button>
@@ -265,71 +337,166 @@ const ResultsPage = ({
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {renderGraphPreview(
-            "Graphique Résiduel (du Tableau)", 
-            manuelBlochResult, 
+            "Graphique Résiduel (Manuel Bloch)",
+            manuelBlochResult,
             "residual"
           )}
-          {renderGraphPreview(
-            "Graphique Ford-Fulkerson", 
-            fordResult, 
-            "ford"
-          )}
+          {renderGraphPreview("Graphique Ford-Fulkerson", fordResult, "ford")}
         </div>
-
         <div className="bg-white p-6 rounded-lg shadow">
-          <h3 className="text-lg font-semibold mb-4">Détails des Algorithmes</h3>
+          <h3 className="text-lg font-semibold mb-4">
+            Détails des Algorithmes
+          </h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="p-4 bg-blue-50 rounded-lg">
               <h4 className="font-medium text-blue-800 mb-2">Manuel Bloch</h4>
-              <p className="text-sm text-blue-700">Flot maximal: {manuelBlochResult?.maxFlow || 0}</p>
-              <p className="text-xs text-blue-600">Chemins utilisés: {manuelBlochResult?.paths?.length || 0}</p>
+              <p className="text-sm text-blue-700">
+                Flot maximal: {manuelBlochResult?.maxFlow || 0}
+              </p>
+              <p className="text-xs text-blue-600">
+                Chemins utilisés: {manuelBlochResult?.paths?.length || 0}
+              </p>
             </div>
             <div className="p-4 bg-green-50 rounded-lg">
-              <h4 className="font-medium text-green-800 mb-2">Ford-Fulkerson</h4>
-              <p className="text-sm text-green-700">Flot maximal: {fordResult?.maxFlow || 0}</p>
-              <p className="text-xs text-green-600">Vérification du résultat optimal</p>
+              <h4 className="font-medium text-green-800 mb-2">
+                Ford-Fulkerson
+              </h4>
+              <p className="text-sm text-green-700">
+                Flot maximal: {fordResult?.maxFlow || 0}
+              </p>
+              <p className="text-xs text-green-600">
+                Vérification du résultat optimal
+              </p>
             </div>
           </div>
         </div>
+
+        {/* Ajouter après le tableau résiduel */}
+        {manuelBlochResult && manuelBlochResult.paths && (
+          <div className="bg-white p-6 rounded-lg shadow mt-6">
+            <h3 className="text-lg font-semibold mb-4">
+              Chemins Augmentants Trouvés (Manuel Bloch)
+            </h3>
+            <div className="space-y-2">
+              {manuelBlochResult.paths.map((pathInfo, index) => (
+                <div key={index} className="p-3 bg-blue-50 rounded-lg">
+                  <div className="font-medium text-blue-800">
+                    Chemin {index + 1}:{" "}
+                    {pathInfo.path
+                      .map(
+                        (nodeId) =>
+                          nodes.find((n) => n.id === nodeId)?.label || nodeId
+                      )
+                      .join(" → ")}
+                  </div>
+                  <div className="text-sm text-blue-600">
+                    Capacité utilisée: {pathInfo.capacity}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {fordResult && fordResult.paths && (
+          <div className="bg-white p-6 rounded-lg shadow mt-6">
+            <h3 className="text-lg font-semibold mb-4">
+              Chemins Augmentants Trouvés (Ford-Fulkerson)
+            </h3>
+            <div className="space-y-2">
+              {fordResult.paths.map((pathInfo, index) => (
+                <div key={index} className="p-3 bg-green-50 rounded-lg">
+                  <div className="font-medium text-green-800">
+                    Chemin {index + 1}:{" "}
+                    {pathInfo.path
+                      .map(
+                        (nodeId) =>
+                          nodes.find((n) => n.id === nodeId)?.label || nodeId
+                      )
+                      .join(" → ")}
+                  </div>
+                  <div className="text-sm text-green-600">
+                    Flot envoyé: {pathInfo.flow}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
 };
 
-const GraphVisualization = ({ 
-  type, 
-  result, 
-  nodes: originalNodes, 
-  edges: originalEdges, 
-  onBack 
+const GraphVisualization = ({
+  type,
+  result,
+  nodes: originalNodes,
+  edges: originalEdges,
+  onBack,
 }) => {
+  console.log("GraphVisualization - Type:", type, "Result:", result);
+
   const getGraphTitle = () => {
-    switch(type) {
-      case 'residual': return 'Graphique Résiduel (Manuel Bloch)';
-      case 'ford': return 'Graphique Ford-Fulkerson';
-      default: return 'Graphique';
+    switch (type) {
+      case "residual":
+        return "Graphique Résiduel (Manuel Bloch)";
+      case "ford":
+        return "Graphique Ford-Fulkerson";
+      default:
+        return "Graphique";
     }
   };
 
   const getColoredEdges = () => {
-    if (type === 'residual' && result?.residualTable) {
-      const finalResidual = result.residualTable[result.residualTable.length - 1].graph;
-      return originalEdges.map(edge => {
-        const residualCapacity = finalResidual[edge.source]?.[edge.target] || 0;
+    if (type === "residual" && result?.flowEdges) {
+      // Pour Manuel Bloch, utiliser flowEdges
+      return result.flowEdges.map((edge) => ({
+        ...edge,
+        color:
+          edge.flow > 0
+            ? edge.flow === edge.capacity
+              ? "#f59e0b"
+              : "#10b981"
+            : "#ef4444",
+      }));
+    } else if (type === "residual" && result?.residualTable) {
+      // Alternative si pas de flowEdges mais residualTable
+      const finalResidual =
+        result.residualTable[result.residualTable.length - 1];
+      return originalEdges.map((edge) => {
+        const residualCapacity =
+          finalResidual.graph[edge.source]?.[edge.target] || 0;
         const usedCapacity = edge.capacity - residualCapacity;
         return {
           ...edge,
           flow: Math.max(0, usedCapacity),
-          color: usedCapacity > 0 ? (usedCapacity === edge.capacity ? '#f59e0b' : '#10b981') : '#ef4444'
+          color:
+            usedCapacity > 0
+              ? usedCapacity === edge.capacity
+                ? "#f59e0b"
+                : "#10b981"
+              : "#ef4444",
         };
       });
-    } else if (type === 'ford' && result?.flowEdges) {
-      return result.flowEdges.map(edge => ({
+    } else if (type === "ford" && result?.flowEdges) {
+      // Pour Ford-Fulkerson
+      return result.flowEdges.map((edge) => ({
         ...edge,
-        color: edge.flow > 0 ? (edge.flow === edge.capacity ? '#f59e0b' : '#10b981') : '#ef4444'
+        color:
+          edge.flow > 0
+            ? edge.flow === edge.capacity
+              ? "#f59e0b"
+              : "#10b981"
+            : "#ef4444",
       }));
     }
-    return originalEdges;
+    // Par défaut
+    return originalEdges.map((edge) => ({
+      ...edge,
+      color: "#6b7280",
+      flow: 0,
+    }));
   };
 
   const coloredEdges = getColoredEdges();
@@ -342,16 +509,20 @@ const GraphVisualization = ({
             <Button onClick={onBack} className="w-full mb-4">
               ← Retour aux Résultats
             </Button>
-            
+
             <Card>
               <CardHeader>
                 <CardTitle>{getGraphTitle()}</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="space-y-2 text-sm">
-                  <p><strong>Flot maximal:</strong> {result?.maxFlow || 0}</p>
-                  {type === 'residual' && result?.paths && (
-                    <p><strong>Chemins trouvés:</strong> {result.paths.length}</p>
+                  <p>
+                    <strong>Flot maximal:</strong> {result?.maxFlow || 0}
+                  </p>
+                  {type === "residual" && result?.paths && (
+                    <p>
+                      <strong>Chemins trouvés:</strong> {result.paths.length}
+                    </p>
                   )}
                 </div>
               </CardContent>
@@ -364,22 +535,28 @@ const GraphVisualization = ({
               <CardContent>
                 <div className="space-y-2">
                   <div className="flex items-center space-x-2">
-                    <div className="w-4 h-1 bg-red-500 rounded"></div>
-                    <span className="text-sm">Arête bloquée (flot = 0)</span>
+                    <div className="w-4 h-1 bg-black rounded"></div>
+                    <span className="text-sm">Capacité nulle (0)</span>
                   </div>
                   <div className="flex items-center space-x-2">
-                    <div className="w-4 h-1 bg-yellow-500 rounded"></div>
-                    <span className="text-sm">Arête saturée (flot = capacité)</span>
+                    <div className="w-4 h-1 bg-red-500 rounded"></div>
+                    <span className="text-sm">Arc bloqué (pas de flot)</span>
                   </div>
                   <div className="flex items-center space-x-2">
                     <div className="w-4 h-1 bg-green-500 rounded"></div>
-                    <span className="text-sm">Arête avec flot partiel</span>
+                    <span className="text-sm">Arc avec flot partiel</span>
                   </div>
+                  <div className="flex items-center space-x-2">
+                    <div className="w-4 h-1 bg-yellow-500 rounded"></div>
+                    <span className="text-sm">
+                      Arc saturé (flot = capacité)
+                    </span>
+                  </div>{" "}
                 </div>
               </CardContent>
             </Card>
 
-            {type === 'residual' && result?.paths && (
+            {type === "residual" && result?.paths && (
               <Card>
                 <CardHeader>
                   <CardTitle>Chemins Utilisés</CardTitle>
@@ -387,12 +564,22 @@ const GraphVisualization = ({
                 <CardContent>
                   <div className="space-y-1 max-h-60 overflow-y-auto">
                     {result.paths.map((pathInfo, index) => (
-                      <div key={index} className="text-xs p-2 bg-blue-50 rounded">
-                        <strong>Chemin {index + 1}:</strong><br/>
-                        {pathInfo.path.map(nodeId => 
-                          originalNodes.find(n => n.id === nodeId)?.label
-                        ).join(' → ')}<br/>
-                        <span className="text-blue-600">Capacité: {pathInfo.capacity}</span>
+                      <div
+                        key={index}
+                        className="text-xs p-2 bg-blue-50 rounded"
+                      >
+                        <strong>Chemin {index + 1}:</strong>
+                        <br />
+                        {pathInfo.path
+                          .map(
+                            (nodeId) =>
+                              originalNodes.find((n) => n.id === nodeId)?.label
+                          )
+                          .join(" → ")}
+                        <br />
+                        <span className="text-blue-600">
+                          Capacité: {pathInfo.capacity}
+                        </span>
                       </div>
                     ))}
                   </div>
@@ -401,13 +588,13 @@ const GraphVisualization = ({
             )}
           </div>
         </div>
-        
+
         <div className="flex-1 relative">
           <svg
             width="100%"
             height="100%"
             className="bg-gray-50"
-            style={{ minHeight: '600px' }}
+            style={{ minHeight: "600px" }}
           >
             <defs>
               <marker
@@ -424,8 +611,8 @@ const GraphVisualization = ({
             </defs>
 
             {coloredEdges.map((edge, i) => {
-              const source = originalNodes.find(n => n.id === edge.source);
-              const target = originalNodes.find(n => n.id === edge.target);
+              const source = originalNodes.find((n) => n.id === edge.source);
+              const target = originalNodes.find((n) => n.id === edge.target);
               if (!source || !target) return null;
 
               const dx = target.x - source.x;
@@ -447,7 +634,7 @@ const GraphVisualization = ({
                     y1={startY}
                     x2={endX}
                     y2={endY}
-                    stroke={edge.color || '#6b7280'}
+                    stroke={edge.color || "#6b7280"}
                     strokeWidth="3"
                     markerEnd="url(#arrowhead-colored)"
                   />
@@ -457,7 +644,9 @@ const GraphVisualization = ({
                     textAnchor="middle"
                     className="text-sm fill-gray-700 font-bold pointer-events-none"
                   >
-                    {edge.flow !== undefined ? `${edge.flow}/${edge.capacity}` : `${edge.capacity}`}
+                    {edge.flow !== undefined
+                      ? `${edge.flow}/${edge.capacity}`
+                      : `${edge.capacity}`}
                   </text>
                 </g>
               );
@@ -469,8 +658,20 @@ const GraphVisualization = ({
                   cx={node.x}
                   cy={node.y}
                   r="30"
-                  fill={node.isSource ? "#16a34a" : node.isTarget ? "#ea580c" : "#219ebc"}
-                  stroke={node.isSource ? "#152614" : node.isTarget ? "#dc2f02" : "#023047"}
+                  fill={
+                    node.isSource
+                      ? "#16a34a"
+                      : node.isTarget
+                      ? "#ea580c"
+                      : "#219ebc"
+                  }
+                  stroke={
+                    node.isSource
+                      ? "#152614"
+                      : node.isTarget
+                      ? "#dc2f02"
+                      : "#023047"
+                  }
                   strokeWidth="3"
                 />
                 <text
@@ -513,9 +714,9 @@ export default function App() {
   const [showResults, setShowResults] = useState(false);
   const [fordResult, setFordResult] = useState(null);
   const [residualTable, setResidualTable] = useState(null);
-  const [currentView, setCurrentView] = useState('main'); // 'main', 'results', 'graph'
-const [currentGraphType, setCurrentGraphType] = useState(null);
-const [currentGraphResult, setCurrentGraphResult] = useState(null);
+  const [currentView, setCurrentView] = useState("main"); // 'main', 'results', 'graph'
+  const [currentGraphType, setCurrentGraphType] = useState(null);
+  const [currentGraphResult, setCurrentGraphResult] = useState(null);
   useEffect(() => {
     document.title = "Calculateur de Flot Maximal - Ford-Fulkerson";
     setMounted(true);
@@ -755,52 +956,66 @@ const [currentGraphResult, setCurrentGraphResult] = useState(null);
       residualGraph[edge.target][edge.source] = 0;
     });
 
-    // Sauvegarder l'état initial pour le tableau
-    const initialResidual = JSON.parse(JSON.stringify(residualGraph));
-    const residualSteps = [
-      { step: 0, graph: JSON.parse(JSON.stringify(residualGraph)) },
-    ];
+    // Tableau des états résiduels - format comme votre document
+    const residualStates = [];
 
-    const findAugmentingPath = () => {
+    // État initial
+    const initialState = {};
+    edges.forEach((edge) => {
+      const key = `${edge.source}-${edge.target}`;
+      initialState[key] = {
+        source: edge.source,
+        target: edge.target,
+        values: [edge.capacity], // Première colonne = capacité initiale
+      };
+    });
+
+    // Algorithme Manuel Bloch avec DFS (recherche en profondeur)
+    const findPath = () => {
       const visited = new Set();
-      const queue = [{ node: sourceId, path: [sourceId] }];
-      visited.add(sourceId);
+      const path = [];
 
-      while (queue.length > 0) {
-        const { node, path } = queue.shift();
-        if (node === targetId) return path;
+      const dfs = (node, target) => {
+        if (node === target) return true;
+        visited.add(node);
+        path.push(node);
 
         for (const neighbor in residualGraph[node]) {
           if (!visited.has(neighbor) && residualGraph[node][neighbor] > 0) {
-            visited.add(neighbor);
-            queue.push({ node: neighbor, path: [...path, neighbor] });
+            if (dfs(neighbor, target)) return true;
           }
         }
+
+        path.pop();
+        return false;
+      };
+
+      if (dfs(sourceId, targetId)) {
+        path.push(targetId);
+        return path;
       }
       return null;
     };
 
-    const getPathCapacity = (path) => {
-      let minCapacity = Infinity;
+    const allPaths = [];
+    let totalFlow = 0;
+    let iterationCount = 0;
+
+    // Boucle principale
+    let path;
+    while ((path = findPath()) && iterationCount < 20) {
+      // Calculer la capacité du chemin
+      let pathCapacity = Infinity;
       for (let i = 0; i < path.length - 1; i++) {
-        minCapacity = Math.min(
-          minCapacity,
+        pathCapacity = Math.min(
+          pathCapacity,
           residualGraph[path[i]][path[i + 1]]
         );
       }
-      return minCapacity;
-    };
 
-    const allPaths = [];
-    const flowEdges = edges.map((edge) => ({ ...edge, flow: 0 }));
-    let totalFlow = 0;
-    let stepCounter = 1;
+      allPaths.push({ path: [...path], capacity: pathCapacity });
 
-    let path;
-    while ((path = findAugmentingPath()) !== null) {
-      const pathCapacity = getPathCapacity(path);
-      allPaths.push({ path: path, capacity: pathCapacity });
-
+      // Mettre à jour le graphe résiduel
       for (let i = 0; i < path.length - 1; i++) {
         const u = path[i];
         const v = path[i + 1];
@@ -809,85 +1024,113 @@ const [currentGraphResult, setCurrentGraphResult] = useState(null);
       }
 
       totalFlow += pathCapacity;
-      residualSteps.push({
-        step: stepCounter,
-        graph: JSON.parse(JSON.stringify(residualGraph)),
-        path: path,
-        flow: pathCapacity,
+
+      // Sauvegarder l'état pour le tableau
+      edges.forEach((edge) => {
+        const key = `${edge.source}-${edge.target}`;
+        const currentResidual = residualGraph[edge.source][edge.target];
+        if (!initialState[key]) return;
+
+        // Ajouter la nouvelle valeur résiduelle
+        initialState[key].values.push(currentResidual);
       });
-      stepCounter++;
+
+      iterationCount++;
     }
 
-    edges.forEach((edge, index) => {
+    // Compléter le tableau avec les valeurs manquantes
+    Object.values(initialState).forEach((edgeData) => {
+      while (edgeData.values.length < iterationCount + 1) {
+        edgeData.values.push(edgeData.values[edgeData.values.length - 1]);
+      }
+    });
+
+    const flowEdges = edges.map((edge) => {
       const originalCapacity = edge.capacity;
       const remainingCapacity = residualGraph[edge.source][edge.target];
       const flow = originalCapacity - remainingCapacity;
-      flowEdges[index].flow = Math.max(0, flow);
+      return { ...edge, flow: Math.max(0, flow) };
     });
 
-    const bestPath =
-      allPaths.length > 0
-        ? [...allPaths].sort((a, b) => b.capacity - a.capacity)[0]
-        : null;
-
+    // REMPLACEZ LA FIN DE LA FONCTION manuelBlochWithResidual PAR :
     return {
       maxFlow: totalFlow,
-      flowEdges,
-      paths: allPaths,
-      recommendedPath: bestPath,
-      residualTable: residualSteps,
+      flowEdges, // Pour la visualisation graphique
+      paths: allPaths, // Pour l'affichage des chemins
+      residualTable: Object.values(initialState), // Pour le tableau
     };
   };
+  const calculateMaxFlow = useCallback(() => {
+    const sourceNode = nodes.find((node) => node.isSource);
+    const targetNode = nodes.find((node) => node.isTarget);
 
-const calculateMaxFlow = useCallback(() => {
-  const sourceNode = nodes.find(node => node.isSource);
-  const targetNode = nodes.find(node => node.isTarget);
+    if (!sourceNode || !targetNode) {
+      showNotification(
+        "Veuillez définir une source et une destination",
+        "error"
+      );
+      return;
+    }
 
-  if (!sourceNode || !targetNode) {
-    showNotification('Veuillez définir une source et une destination', 'error');
-    return;
-  }
+    if (sourceNode.id === targetNode.id) {
+      showNotification(
+        "La source et la destination ne peuvent pas être le même nœud",
+        "error"
+      );
+      return;
+    }
 
-  if (sourceNode.id === targetNode.id) {
-    showNotification('La source et la destination ne peuvent pas être le même nœud', 'error');
-    return;
-  }
+    setOriginalEdges([...edges]);
 
-  setOriginalEdges([...edges]);
+    try {
+      // Exécuter Manuel Bloch
+      const manuelResult = manuelBlochWithResidual(
+        nodes,
+        edges,
+        sourceNode.id,
+        targetNode.id
+      );
 
-  // Exécuter l'algorithme Manuel Bloch avec tableau résiduel
-  const manuelResult = manuelBlochWithResidual(nodes, edges, sourceNode.id, targetNode.id);
-  
-  // Exécuter Ford-Fulkerson
-  const fordResult = fordFulkerson(nodes, edges, sourceNode.id, targetNode.id);
+      // Exécuter Ford-Fulkerson
+      const fordResult = fordFulkerson(
+        nodes,
+        edges,
+        sourceNode.id,
+        targetNode.id
+      );
 
-  // Stocker tous les résultats
-  setManuelBlochResult(manuelResult);
-  setFordResult(fordResult);
-  setResidualTable(manuelResult.residualTable);
-  setCurrentView('results');
+      // Vérification des résultats
+      const maxFlowValue = Math.max(manuelResult.maxFlow, fordResult.maxFlow);
 
-  showNotification(`Calculs terminés!`, 'success');
-}, [nodes, edges]);
+      setManuelBlochResult(manuelResult);
+      setFordResult(fordResult);
+      setResidualTable(manuelResult.residualTable);
+      setCurrentView("results");
 
+      showNotification(`Flot maximal calculé: ${maxFlowValue}`, "success");
+    } catch (error) {
+      console.error("Erreur lors du calcul:", error);
+      showNotification("Erreur lors du calcul du flot maximal", "error");
+    }
+  }, [nodes, edges]);
 
-const handleViewGraph = useCallback((type, result) => {
-  setCurrentGraphType(type);
-  setCurrentGraphResult(result);
-  setCurrentView('graph');
-}, []);
+  const handleViewGraph = useCallback((type, result) => {
+    setCurrentGraphType(type);
+    setCurrentGraphResult(result);
+    setCurrentView("graph");
+  }, []);
 
-const handleBackToMain = useCallback(() => {
-  setCurrentView('main');
-  setCurrentGraphType(null);
-  setCurrentGraphResult(null);
-}, []);
+  const handleBackToMain = useCallback(() => {
+    setCurrentView("main");
+    setCurrentGraphType(null);
+    setCurrentGraphResult(null);
+  }, []);
 
-const handleBackToResults = useCallback(() => {
-  setCurrentView('results');
-  setCurrentGraphType(null);
-  setCurrentGraphResult(null);
-}, []);
+  const handleBackToResults = useCallback(() => {
+    setCurrentView("results");
+    setCurrentGraphType(null);
+    setCurrentGraphResult(null);
+  }, []);
   const resetWorkspace = useCallback(() => {
     setNodes([]);
     setEdges([]);
@@ -900,13 +1143,24 @@ const handleBackToResults = useCallback(() => {
     setConnectingFrom(null);
     setManuelBlochResult(null);
     showNotification("Plan de travail réinitialisé", "success");
-    setShowResults(false);
+
+    setShowResults(true);
+
+    setCurrentView("results");
     setFordResult(null);
     setResidualTable(null);
   }, []);
 
   const getSourceNode = () => nodes.find((node) => node.isSource);
   const getTargetNode = () => nodes.find((node) => node.isTarget);
+
+  const getEdgeColor = (edge) => {
+    if (edge.capacity === 0) {
+      return "#000000"; // noir - capacité nulle
+    }
+    // Pour le canvas principal, on garde la couleur grise par défaut
+    return "#6b7280"; // gris par défaut
+  };
 
   const renderCanvas = () => {
     return (
@@ -964,7 +1218,7 @@ const handleBackToResults = useCallback(() => {
           const endX = target.x - unitX * (radius + 10); // Ajustement pour la flèche
           const endY = target.y - unitY * (radius + 10);
 
-          let strokeColor = "#6b7280"; // couleur par défaut
+          let strokeColor = getEdgeColor(edge); // couleur par défaut
 
           return (
             <g key={i}>
@@ -1036,12 +1290,15 @@ const handleBackToResults = useCallback(() => {
   if (!mounted) return null;
 
   // SUPPRIMER L'ANCIEN RETURN ET LE REMPLACER PAR :
-  
+
   // Rendu conditionnel selon la vue actuelle
-  if (currentView === 'results') {
+  if (currentView === "results") {
     return (
       <ResultsPage
-        maxFlow={Math.max(manuelBlochResult?.maxFlow || 0, fordResult?.maxFlow || 0)}
+        maxFlow={Math.max(
+          manuelBlochResult?.maxFlow || 0,
+          fordResult?.maxFlow || 0
+        )}
         residualTable={residualTable}
         manuelBlochResult={manuelBlochResult}
         fordResult={fordResult}
@@ -1052,7 +1309,7 @@ const handleBackToResults = useCallback(() => {
     );
   }
 
-  if (currentView === 'graph') {
+  if (currentView === "graph") {
     return (
       <GraphVisualization
         type={currentGraphType}
@@ -1063,11 +1320,12 @@ const handleBackToResults = useCallback(() => {
       />
     );
   }
-
   return (
-<div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
       <div className="flex h-screen">
-        <div className="w-80 bg-white shadow-lg border-r overflow-y-auto">          {/* Panneaux, Cartes et Boutons */}
+        <div className="w-80 bg-white shadow-lg border-r overflow-y-auto">
+          {" "}
+          {/* Panneaux, Cartes et Boutons */}
           <div className="p-6 space-y-6">
             <Card>
               <CardHeader>
@@ -1360,7 +1618,6 @@ const handleBackToResults = useCallback(() => {
                 <p>• Calculez le flot maximal</p>
               </CardContent>
             </Card>*/}
-
           </div>
         </div>
         <div className="flex-1 relative">{renderCanvas()}</div>
