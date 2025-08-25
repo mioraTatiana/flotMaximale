@@ -466,34 +466,41 @@ const GraphVisualization = ({
   };
 
   const getColoredEdges = () => {
-    if (type === "residual" && result?.flowEdges) {
-      // Pour Manuel Bloch, utiliser flowEdges
-      return result.flowEdges.map((edge) => ({
-        ...edge,
-        color:
-          edge.flow > 0
-            ? edge.flow === edge.capacity
-              ? "#f59e0b"
-              : "#10b981"
-            : "#ef4444",
-      }));
-    } else if (type === "residual" && result?.residualTable) {
-      // Alternative si pas de flowEdges mais residualTable
-      const finalResidual =
-        result.residualTable[result.residualTable.length - 1];
+    if (type === "residual" && result?.residualTable) {
+      // Pour Manuel Bloch, calculer le flot à partir du tableau résiduel
       return originalEdges.map((edge) => {
-        const residualCapacity =
-          finalResidual.graph[edge.source]?.[edge.target] || 0;
-        const usedCapacity = edge.capacity - residualCapacity;
+        const edgeData = result.residualTable.find(
+          (item) => item.source === edge.source && item.target === edge.target
+        );
+
+        if (edgeData && edgeData.values && edgeData.values.length > 1) {
+          // Calculer le flot utilisé
+          const originalCapacity = edgeData.values[0]; // Première valeur = capacité initiale
+          const finalResidual = edgeData.values[edgeData.values.length - 1]; // Dernière valeur = capacité résiduelle finale
+          const usedFlow = originalCapacity - finalResidual;
+          
+          // Déterminer la couleur basée sur le statut final
+          const finalStatus = edgeData.statuses?.[edgeData.statuses.length - 1] || "";
+          
+          return {
+            ...edge,
+            flow: Math.max(0, usedFlow),
+            color:
+              finalStatus === "S"
+                ? "#f59e0b" // Jaune pour Saturé
+                : finalStatus === "B"
+                ? "#ef4444" // Rouge pour Bloqué
+                : usedFlow > 0
+                ? "#10b981" // Vert pour partiellement utilisé
+                : "#6b7280", // Gris pour non utilisé
+          };
+        }
+
+        // Fallback si pas de données dans le tableau résiduel
         return {
           ...edge,
-          flow: Math.max(0, usedCapacity),
-          color:
-            usedCapacity > 0
-              ? usedCapacity === edge.capacity
-                ? "#f59e0b"
-                : "#10b981"
-              : "#ef4444",
+          flow: 0,
+          color: "#6b7280",
         };
       });
     } else if (type === "ford" && result?.flowEdges) {
@@ -501,13 +508,14 @@ const GraphVisualization = ({
       return result.flowEdges.map((edge) => ({
         ...edge,
         color:
-          edge.flow > 0
-            ? edge.flow === edge.capacity
-              ? "#f59e0b"
-              : "#10b981"
-            : "#ef4444",
+          edge.flow === edge.capacity
+            ? "#f59e0b" // Jaune (Saturé)
+            : edge.flow > 0
+            ? "#ef4444" // Rouge (Utilisé)
+            : "#6b7280", // Gris (Non utilisé)
       }));
     }
+
     // Par défaut
     return originalEdges.map((edge) => ({
       ...edge,
@@ -552,23 +560,50 @@ const GraphVisualization = ({
               <CardContent>
                 <div className="space-y-2">
                   <div className="flex items-center space-x-2">
-                    <div className="w-4 h-1 bg-black rounded"></div>
-                    <span className="text-sm">Capacité nulle (0)</span>
-                  </div>
-                  <div className="flex items-center space-x-2">
                     <div className="w-4 h-1 bg-red-500 rounded"></div>
-                    <span className="text-sm">Arc bloqué (pas de flot)</span>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <div className="w-4 h-1 bg-green-500 rounded"></div>
-                    <span className="text-sm">Arc avec flot partiel</span>
+                    <span className="text-sm">
+                      Arc bloqué (B) - A transporté du flot mais ne peut plus
+                    </span>
                   </div>
                   <div className="flex items-center space-x-2">
                     <div className="w-4 h-1 bg-yellow-500 rounded"></div>
                     <span className="text-sm">
-                      Arc saturé (flot = capacité)
+                      Arc saturé (S) - Capacité entièrement utilisée
                     </span>
-                  </div>{" "}
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <div className="w-4 h-1 bg-green-500 rounded"></div>
+                    <span className="text-sm">Arc partiellement utilisé</span>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <div className="w-4 h-1 bg-gray-500 rounded"></div>
+                    <span className="text-sm">Arc non utilisé</span>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Détails des arcs avec le flot */}
+            <Card>
+              <CardHeader>
+                <CardTitle>Détails des Arcs</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-1 max-h-60 overflow-y-auto">
+                  {coloredEdges
+                    .filter((edge) => edge.flow > 0)
+                    .map((edge, index) => {
+                      const sourceLabel = originalNodes.find((n) => n.id === edge.source)?.label || edge.source;
+                      const targetLabel = originalNodes.find((n) => n.id === edge.target)?.label || edge.target;
+                      
+                      return (
+                        <div key={index} className="text-xs p-2 bg-blue-50 rounded">
+                          <strong>{sourceLabel} → {targetLabel}</strong>
+                          <br />
+                          Flot: {edge.flow}/{edge.capacity}
+                        </div>
+                      );
+                    })}
                 </div>
               </CardContent>
             </Card>
@@ -661,6 +696,7 @@ const GraphVisualization = ({
                     textAnchor="middle"
                     className="text-sm fill-gray-700 font-bold pointer-events-none"
                   >
+                    {/* Affichage correct du flot/capacité */}
                     {edge.flow !== undefined
                       ? `${edge.flow}/${edge.capacity}`
                       : `${edge.capacity}`}
@@ -1216,13 +1252,25 @@ export default function App() {
   const getTargetNode = () => nodes.find((node) => node.isTarget);
 
   const getEdgeColor = (edge) => {
+    // Si on a des résultats de Manuel Bloch, utiliser les statuts
+    if (manuelBlochResult?.residualTable) {
+      const edgeData = manuelBlochResult.residualTable.find(
+        (item) => item.source === edge.source && item.target === edge.target
+      );
+
+      if (edgeData && edgeData.statuses) {
+        const finalStatus = edgeData.statuses[edgeData.statuses.length - 1];
+        if (finalStatus === "S") return "#f59e0b"; // Jaune pour Saturé
+        if (finalStatus === "B") return "#ef4444"; // Rouge pour Bloqué
+      }
+    }
+
+    // Couleur par défaut
     if (edge.capacity === 0) {
       return "#000000"; // noir - capacité nulle
     }
-    // Pour le canvas principal, on garde la couleur grise par défaut
     return "#6b7280"; // gris par défaut
   };
-
   const renderCanvas = () => {
     return (
       <svg
