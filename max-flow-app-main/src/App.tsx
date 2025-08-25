@@ -251,19 +251,29 @@ const ResultsPage = ({
                     <td className="border border-gray-300 px-3 py-2 text-center font-medium">
                       {initialCapacity}
                     </td>
+
                     {edgeData.values.slice(1).map((value, valueIndex) => {
+                      const status = edgeData.statuses
+                        ? edgeData.statuses[valueIndex + 1]
+                        : "";
                       let displayValue = value;
                       let cellClass =
                         "border border-gray-300 px-2 py-2 text-center text-sm font-medium ";
 
-                      if (value === 0) {
-                        displayValue = "B"; // Bloqué
+                      if (status === "S") {
+                        // Arc saturé : toute la capacité utilisée
+                        displayValue = "S";
+                        cellClass += "bg-yellow-100 text-yellow-800";
+                      } else if (status === "B") {
+                        // Arc bloqué : a de la capacité résiduelle mais ne peut plus être utilisé
+                        displayValue = "B";
                         cellClass += "bg-red-100 text-red-800";
                       } else if (value === initialCapacity) {
+                        // Arc pas encore utilisé
                         cellClass += "bg-white";
                       } else {
-                        displayValue = "S"; // Saturé (partiellement utilisé)
-                        cellClass += "bg-yellow-100 text-yellow-800";
+                        // Arc partiellement utilisé mais peut encore être utilisé
+                        cellClass += "bg-green-100 text-green-800";
                       }
 
                       return (
@@ -278,18 +288,25 @@ const ResultsPage = ({
             </tbody>
           </table>
         </div>
-
         {/* Légende */}
-        <div className="mt-4 flex gap-6 text-sm">
+        <div className="mt-4 flex gap-4 text-sm flex-wrap">
           <div className="flex items-center gap-2">
             <div className="w-4 h-4 bg-red-100 border border-red-300"></div>
-            <span>B = Bloqué</span>
+            <span>B = Bloqué (capacité restante mais inutilisable)</span>
           </div>
           <div className="flex items-center gap-2">
             <div className="w-4 h-4 bg-yellow-100 border border-yellow-300"></div>
-            <span>S = Saturé</span>
+            <span>S = Saturé (capacité entièrement utilisée)</span>
           </div>
-        </div>
+          <div className="flex items-center gap-2">
+            <div className="w-4 h-4 bg-green-100 border border-green-300"></div>
+            <span>Partiellement utilisé</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-4 h-4 bg-white border border-gray-300"></div>
+            <span>Pas encore utilisé</span>
+          </div>
+        </div>{" "}
       </div>
     );
   };
@@ -956,7 +973,7 @@ export default function App() {
       residualGraph[edge.target][edge.source] = 0;
     });
 
-    // Tableau des états résiduels - format comme votre document
+    // Tableau des états résiduels avec statut des arcs
     const residualStates = [];
 
     // État initial
@@ -967,10 +984,34 @@ export default function App() {
         source: edge.source,
         target: edge.target,
         values: [edge.capacity], // Première colonne = capacité initiale
+        statuses: [""], // Statuts pour chaque itération
       };
     });
 
-    // Algorithme Manuel Bloch avec DFS (recherche en profondeur)
+    // Fonction pour vérifier si un arc peut encore être utilisé
+    const canArcBeUsed = (from, to, currentGraph) => {
+      if (currentGraph[from][to] <= 0) return false;
+
+      // Faire un BFS pour voir si cet arc peut faire partie d'un chemin vers la cible
+      const visited = new Set();
+      const queue = [to]; // Commencer depuis la destination de l'arc
+      visited.add(to);
+
+      while (queue.length > 0) {
+        const current = queue.shift();
+        if (current === targetId) return true; // L'arc peut contribuer à un chemin
+
+        for (const neighbor in currentGraph[current]) {
+          if (!visited.has(neighbor) && currentGraph[current][neighbor] > 0) {
+            visited.add(neighbor);
+            queue.push(neighbor);
+          }
+        }
+      }
+      return false; // L'arc ne peut pas contribuer à un chemin vers la cible
+    };
+
+    // Algorithme Manuel Bloch avec DFS
     const findPath = () => {
       const visited = new Set();
       const path = [];
@@ -1025,14 +1066,33 @@ export default function App() {
 
       totalFlow += pathCapacity;
 
-      // Sauvegarder l'état pour le tableau
+      // Sauvegarder l'état et déterminer les statuts
       edges.forEach((edge) => {
         const key = `${edge.source}-${edge.target}`;
         const currentResidual = residualGraph[edge.source][edge.target];
+        const originalCapacity = edge.capacity;
+
         if (!initialState[key]) return;
 
         // Ajouter la nouvelle valeur résiduelle
         initialState[key].values.push(currentResidual);
+
+        // Déterminer le statut
+        let status = "";
+        if (currentResidual === 0) {
+          status = "S"; // Saturé : plus de capacité résiduelle
+        } else if (currentResidual === originalCapacity) {
+          status = ""; // Pas encore utilisé
+        } else {
+          // Vérifier si l'arc est bloqué (ne peut plus être utilisé)
+          if (!canArcBeUsed(edge.source, edge.target, residualGraph)) {
+            status = "B"; // Bloqué : a de la capacité mais ne peut plus être utilisé
+          } else {
+            status = ""; // Partiellement utilisé mais peut encore être utilisé
+          }
+        }
+
+        initialState[key].statuses.push(status);
       });
 
       iterationCount++;
@@ -1042,6 +1102,7 @@ export default function App() {
     Object.values(initialState).forEach((edgeData) => {
       while (edgeData.values.length < iterationCount + 1) {
         edgeData.values.push(edgeData.values[edgeData.values.length - 1]);
+        edgeData.statuses.push(edgeData.statuses[edgeData.statuses.length - 1]);
       }
     });
 
@@ -1052,14 +1113,14 @@ export default function App() {
       return { ...edge, flow: Math.max(0, flow) };
     });
 
-    // REMPLACEZ LA FIN DE LA FONCTION manuelBlochWithResidual PAR :
     return {
       maxFlow: totalFlow,
-      flowEdges, // Pour la visualisation graphique
-      paths: allPaths, // Pour l'affichage des chemins
-      residualTable: Object.values(initialState), // Pour le tableau
+      flowEdges,
+      paths: allPaths,
+      residualTable: Object.values(initialState),
     };
   };
+
   const calculateMaxFlow = useCallback(() => {
     const sourceNode = nodes.find((node) => node.isSource);
     const targetNode = nodes.find((node) => node.isTarget);
