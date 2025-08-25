@@ -2,97 +2,82 @@ import React, { useState, useCallback, useRef, useEffect } from "react";
 
 // Algorithme Ford-Fulkerson
 const fordFulkerson = (nodes, edges, sourceId, targetId) => {
-  // Construire le graphe résiduel
   const residualGraph = {};
-  nodes.forEach((node) => {
-    residualGraph[node.id] = {};
-  });
-
+  nodes.forEach((node) => (residualGraph[node.id] = {}));
   edges.forEach((edge) => {
     residualGraph[edge.source][edge.target] = edge.capacity;
     if (!residualGraph[edge.target]) residualGraph[edge.target] = {};
     residualGraph[edge.target][edge.source] = 0;
   });
 
-  // BFS amélioré pour Ford-Fulkerson
-  const bfs = (source, target, parent) => {
+  const parent = {};
+  const bfs = (source, target) => {
     const visited = new Set();
     const queue = [source];
     visited.add(source);
     parent[source] = null;
 
-    while (queue.length > 0) {
+    while (queue.length) {
       const u = queue.shift();
-
-      // Trier les voisins par capacité décroissante (optimisation)
-      const neighbors = Object.keys(residualGraph[u])
-        .filter((v) => !visited.has(v) && residualGraph[u][v] > 0)
-        .sort((a, b) => residualGraph[u][b] - residualGraph[u][a]);
-
-      for (const v of neighbors) {
-        visited.add(v);
-        parent[v] = u;
-        queue.push(v);
-
-        if (v === target) {
-          return true;
+      for (const v in residualGraph[u]) {
+        if (!visited.has(v) && residualGraph[u][v] > 0) {
+          visited.add(v);
+          parent[v] = u;
+          if (v === target) return true;
+          queue.push(v);
         }
       }
     }
-
     return false;
   };
 
   let maxFlow = 0;
-  const parent = {};
   const paths = [];
+  const markings = []; // pour stocker les marquages (+/-)
 
-  // Algorithme principal Ford-Fulkerson
-  while (bfs(sourceId, targetId, parent)) {
-    // Trouver la capacité minimale le long du chemin
+  while (bfs(sourceId, targetId)) {
     let pathFlow = Infinity;
-    const currentPath = [];
+    const path = [];
     let s = targetId;
 
-    // Reconstruire le chemin
     while (s !== sourceId) {
-      currentPath.unshift(s);
+      path.unshift(s);
       pathFlow = Math.min(pathFlow, residualGraph[parent[s]][s]);
       s = parent[s];
     }
-    currentPath.unshift(sourceId);
+    path.unshift(sourceId);
 
-    paths.push({ path: currentPath, flow: pathFlow });
-
-    // Ajouter le flot du chemin au flot total
     maxFlow += pathFlow;
+    paths.push({ path, flow: pathFlow });
 
-    // Mettre à jour les capacités résiduelles
+    const markSet = [];
+
     let v = targetId;
     while (v !== sourceId) {
       const u = parent[v];
       residualGraph[u][v] -= pathFlow;
       residualGraph[v][u] += pathFlow;
+
+      markSet.push({ from: u, to: v, value: `+${pathFlow}` });
+      markSet.push({ from: v, to: u, value: `-${pathFlow}` });
+
       v = parent[v];
     }
+    markings.push(markSet);
   }
 
-  // Calculer le flot final sur chaque arête
   const flowEdges = edges.map((edge) => {
     const originalCapacity = edge.capacity;
     const remainingCapacity = residualGraph[edge.source][edge.target];
     const flow = originalCapacity - remainingCapacity;
-
-    return {
-      ...edge,
-      flow: Math.max(0, flow),
-    };
+    return { ...edge, flow: Math.max(0, flow) };
   });
 
   return {
     maxFlow,
     flowEdges,
-    paths: paths,
+    paths,
+    markings, // ajouter pour le rendu
   };
 };
 // Composants UI
@@ -475,16 +460,32 @@ const GraphVisualization = ({
           edgeData?.statuses[edgeData.statuses.length - 1] || "";
 
         const finalFlow =
-          edge.capacity - edgeData?.values[edgeData.values.length - 1] || 0;
+          edge.capacity -
+          (edgeData?.values[edgeData.values.length - 1] || edge.capacity);
 
         return {
           ...edge,
           flow: finalFlow,
-          color: finalStatus === "S" ? "#f59e0b" : "#ef4444", // Jaune pour S, Rouge pour B
+          color: finalStatus === "S" ? "#f59e0b" : "#ef4444", // Jaune (S), Rouge (B)
         };
       });
+    } else if (type === "ford" && result?.flowEdges) {
+      return result.flowEdges.map((edge) => ({
+        ...edge,
+        color:
+          edge.flow === edge.capacity
+            ? "#f59e0b" // Jaune saturé
+            : edge.flow > 0
+            ? "#ef4444" // Rouge utilisé
+            : "#6b7280", // Gris inutilisé
+      }));
     }
-    return originalEdges;
+
+    return originalEdges.map((edge) => ({
+      ...edge,
+      color: "#6b7280",
+      flow: 0,
+    }));
   };
 
   const coloredEdges = getColoredEdges();
@@ -668,11 +669,33 @@ const GraphVisualization = ({
                     textAnchor="middle"
                     className="text-sm fill-gray-700 font-bold pointer-events-none"
                   >
-                    {/* Affichage correct du flot/capacité */}
                     {edge.flow !== undefined
                       ? `${edge.flow}/${edge.capacity}`
                       : `${edge.capacity}`}
                   </text>
+
+                  {/* Ajout des marquages sous l'arc (Ford-Fulkerson) */}
+                  {type === "ford" &&
+                    result.markings &&
+                    result.markings.forEach((set) => {
+                      set.forEach((mark) => {
+                        if (
+                          mark.from === edge.source &&
+                          mark.to === edge.target
+                        ) {
+                          return (
+                            <text
+                              x={(startX + endX) / 2}
+                              y={(startY + endY) / 2 + 15}
+                              textAnchor="middle"
+                              className="text-xs fill-blue-500 font-bold"
+                            >
+                              {mark.value}
+                            </text>
+                          );
+                        }
+                      });
+                    })}
                 </g>
               );
             })}
