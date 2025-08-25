@@ -467,61 +467,24 @@ const GraphVisualization = ({
 
   const getColoredEdges = () => {
     if (type === "residual" && result?.residualTable) {
-      // Pour Manuel Bloch, calculer le flot à partir du tableau résiduel
       return originalEdges.map((edge) => {
         const edgeData = result.residualTable.find(
           (item) => item.source === edge.source && item.target === edge.target
         );
+        const finalStatus =
+          edgeData?.statuses[edgeData.statuses.length - 1] || "";
 
-        if (edgeData && edgeData.values && edgeData.values.length > 1) {
-          // Calculer le flot utilisé
-          const originalCapacity = edgeData.values[0]; // Première valeur = capacité initiale
-          const finalResidual = edgeData.values[edgeData.values.length - 1]; // Dernière valeur = capacité résiduelle finale
-          const usedFlow = originalCapacity - finalResidual;
-          
-          // Déterminer la couleur basée sur le statut final
-          const finalStatus = edgeData.statuses?.[edgeData.statuses.length - 1] || "";
-          
-          return {
-            ...edge,
-            flow: Math.max(0, usedFlow),
-            color:
-              finalStatus === "S"
-                ? "#f59e0b" // Jaune pour Saturé
-                : finalStatus === "B"
-                ? "#ef4444" // Rouge pour Bloqué
-                : usedFlow > 0
-                ? "#10b981" // Vert pour partiellement utilisé
-                : "#6b7280", // Gris pour non utilisé
-          };
-        }
+        const finalFlow =
+          edge.capacity - edgeData?.values[edgeData.values.length - 1] || 0;
 
-        // Fallback si pas de données dans le tableau résiduel
         return {
           ...edge,
-          flow: 0,
-          color: "#6b7280",
+          flow: finalFlow,
+          color: finalStatus === "S" ? "#f59e0b" : "#ef4444", // Jaune pour S, Rouge pour B
         };
       });
-    } else if (type === "ford" && result?.flowEdges) {
-      // Pour Ford-Fulkerson
-      return result.flowEdges.map((edge) => ({
-        ...edge,
-        color:
-          edge.flow === edge.capacity
-            ? "#f59e0b" // Jaune (Saturé)
-            : edge.flow > 0
-            ? "#ef4444" // Rouge (Utilisé)
-            : "#6b7280", // Gris (Non utilisé)
-      }));
     }
-
-    // Par défaut
-    return originalEdges.map((edge) => ({
-      ...edge,
-      color: "#6b7280",
-      flow: 0,
-    }));
+    return originalEdges;
   };
 
   const coloredEdges = getColoredEdges();
@@ -593,12 +556,21 @@ const GraphVisualization = ({
                   {coloredEdges
                     .filter((edge) => edge.flow > 0)
                     .map((edge, index) => {
-                      const sourceLabel = originalNodes.find((n) => n.id === edge.source)?.label || edge.source;
-                      const targetLabel = originalNodes.find((n) => n.id === edge.target)?.label || edge.target;
-                      
+                      const sourceLabel =
+                        originalNodes.find((n) => n.id === edge.source)
+                          ?.label || edge.source;
+                      const targetLabel =
+                        originalNodes.find((n) => n.id === edge.target)
+                          ?.label || edge.target;
+
                       return (
-                        <div key={index} className="text-xs p-2 bg-blue-50 rounded">
-                          <strong>{sourceLabel} → {targetLabel}</strong>
+                        <div
+                          key={index}
+                          className="text-xs p-2 bg-blue-50 rounded"
+                        >
+                          <strong>
+                            {sourceLabel} → {targetLabel}
+                          </strong>
                           <br />
                           Flot: {edge.flow}/{edge.capacity}
                         </div>
@@ -997,7 +969,6 @@ export default function App() {
   }, [selectedEdge, newCapacity]);
 
   const manuelBlochWithResidual = (nodes, edges, sourceId, targetId) => {
-    // Construire le graphe résiduel
     const residualGraph = {};
     nodes.forEach((node) => {
       residualGraph[node.id] = {};
@@ -1009,79 +980,63 @@ export default function App() {
       residualGraph[edge.target][edge.source] = 0;
     });
 
-    // Tableau des états résiduels avec statut des arcs
-    const residualStates = [];
-
-    // État initial
     const initialState = {};
     edges.forEach((edge) => {
       const key = `${edge.source}-${edge.target}`;
       initialState[key] = {
         source: edge.source,
         target: edge.target,
-        values: [edge.capacity], // Première colonne = capacité initiale
-        statuses: [""], // Statuts pour chaque itération
+        values: [edge.capacity],
+        statuses: [""],
       };
     });
 
-    // Fonction pour vérifier si un arc peut encore être utilisé
-    const canArcBeUsed = (from, to, currentGraph) => {
-      if (currentGraph[from][to] <= 0) return false;
-
-      // Faire un BFS pour voir si cet arc peut faire partie d'un chemin vers la cible
-      const visited = new Set();
-      const queue = [to]; // Commencer depuis la destination de l'arc
-      visited.add(to);
-
-      while (queue.length > 0) {
-        const current = queue.shift();
-        if (current === targetId) return true; // L'arc peut contribuer à un chemin
-
-        for (const neighbor in currentGraph[current]) {
-          if (!visited.has(neighbor) && currentGraph[current][neighbor] > 0) {
-            visited.add(neighbor);
-            queue.push(neighbor);
-          }
-        }
-      }
-      return false; // L'arc ne peut pas contribuer à un chemin vers la cible
-    };
-
-    // Algorithme Manuel Bloch avec DFS
     const findPath = () => {
       const visited = new Set();
       const path = [];
-
-      const dfs = (node, target) => {
-        if (node === target) return true;
+      const dfs = (node) => {
+        if (node === targetId) return true;
         visited.add(node);
         path.push(node);
-
         for (const neighbor in residualGraph[node]) {
           if (!visited.has(neighbor) && residualGraph[node][neighbor] > 0) {
-            if (dfs(neighbor, target)) return true;
+            if (dfs(neighbor)) return true;
           }
         }
-
         path.pop();
         return false;
       };
-
-      if (dfs(sourceId, targetId)) {
+      if (dfs(sourceId)) {
         path.push(targetId);
         return path;
       }
       return null;
     };
 
+    const canArcBeUsed = (from, to) => {
+      if (residualGraph[from][to] <= 0) return false;
+      const visited = new Set();
+      const queue = [to];
+      visited.add(to);
+      while (queue.length > 0) {
+        const current = queue.shift();
+        if (current === targetId) return true;
+        for (const neighbor in residualGraph[current]) {
+          if (!visited.has(neighbor) && residualGraph[current][neighbor] > 0) {
+            visited.add(neighbor);
+            queue.push(neighbor);
+          }
+        }
+      }
+      return false;
+    };
+
     const allPaths = [];
     let totalFlow = 0;
     let iterationCount = 0;
-
-    // Boucle principale
     let path;
+
     while ((path = findPath()) && iterationCount < 20) {
-      // Calculer la capacité du chemin
       let pathCapacity = Infinity;
       for (let i = 0; i < path.length - 1; i++) {
         pathCapacity = Math.min(
@@ -1092,7 +1047,6 @@ export default function App() {
 
       allPaths.push({ path: [...path], capacity: pathCapacity });
 
-      // Mettre à jour le graphe résiduel
       for (let i = 0; i < path.length - 1; i++) {
         const u = path[i];
         const v = path[i + 1];
@@ -1102,50 +1056,38 @@ export default function App() {
 
       totalFlow += pathCapacity;
 
-      // Sauvegarder l'état et déterminer les statuts
       edges.forEach((edge) => {
         const key = `${edge.source}-${edge.target}`;
         const currentResidual = residualGraph[edge.source][edge.target];
-        const originalCapacity = edge.capacity;
-
-        if (!initialState[key]) return;
-
-        // Ajouter la nouvelle valeur résiduelle
         initialState[key].values.push(currentResidual);
 
-        // Déterminer le statut
         let status = "";
         if (currentResidual === 0) {
-          status = "S"; // Saturé : plus de capacité résiduelle
-        } else if (currentResidual === originalCapacity) {
-          status = ""; // Pas encore utilisé
-        } else {
-          // Vérifier si l'arc est bloqué (ne peut plus être utilisé)
-          if (!canArcBeUsed(edge.source, edge.target, residualGraph)) {
-            status = "B"; // Bloqué : a de la capacité mais ne peut plus être utilisé
-          } else {
-            status = ""; // Partiellement utilisé mais peut encore être utilisé
-          }
+          status = "S"; // saturé
+        } else if (!canArcBeUsed(edge.source, edge.target)) {
+          status = "B"; // bloqué
         }
-
         initialState[key].statuses.push(status);
       });
 
       iterationCount++;
     }
 
-    // Compléter le tableau avec les valeurs manquantes
+    // Dernière colonne → forcer S ou B
     Object.values(initialState).forEach((edgeData) => {
-      while (edgeData.values.length < iterationCount + 1) {
-        edgeData.values.push(edgeData.values[edgeData.values.length - 1]);
-        edgeData.statuses.push(edgeData.statuses[edgeData.statuses.length - 1]);
+      const lastResidual = edgeData.values[edgeData.values.length - 1];
+      if (lastResidual === 0) {
+        edgeData.statuses[edgeData.statuses.length - 1] = "S";
+      } else {
+        edgeData.statuses[edgeData.statuses.length - 1] = "B";
       }
     });
 
+    // Calcul des flots finaux
     const flowEdges = edges.map((edge) => {
       const originalCapacity = edge.capacity;
       const remainingCapacity = residualGraph[edge.source][edge.target];
-      const flow = originalCapacity - remainingCapacity;
+      const flow = originalCapacity - remainingCapacity; // flot = capacité initiale - résiduelle
       return { ...edge, flow: Math.max(0, flow) };
     });
 
@@ -1271,6 +1213,7 @@ export default function App() {
     }
     return "#6b7280"; // gris par défaut
   };
+
   const renderCanvas = () => {
     return (
       <svg
